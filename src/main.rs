@@ -1,12 +1,13 @@
 #![allow(unused)] // Will silence unused warnings whilhe exploring (TODO: comment out)
 
-use bevy::{math::Vec3Swizzles, prelude::*, sprite::collide_aabb::collide, utils::HashSet};
+use bevy::{math::Vec3Swizzles, prelude::*, sprite::collide_aabb::collide};
 use components::{
     Enemy, Explosion, ExplosionTimer, ExplosionToSpawn, FromEnemy, FromPlayer, Laser, Movable,
     Player, SpriteSize, Velocity,
 };
 use enemy::EnemyPlugin;
-use player::PLayerPlugin;
+use player::PlayerPlugin;
+use std::collections::HashSet;
 
 mod components;
 mod enemy;
@@ -33,6 +34,7 @@ const SPRITE_SCALE: f32 = 0.5;
 const TIME_STEP: f32 = 1. / 60.;
 const BASE_SPEED: f32 = 500.;
 
+const PLAYER_RESPAWN_DELAY: f64 = 2.;
 const ENEMY_MAX: u32 = 2;
 // endregion: --- Game Constants
 
@@ -51,6 +53,31 @@ struct GameTextures {
 }
 
 struct EnemyCount(u32);
+
+struct PlayerState {
+    on: bool,       // Alive
+    last_shot: f64, // -1 if not shot
+}
+
+impl Default for PlayerState {
+    fn default() -> Self {
+        Self {
+            on: false,
+            last_shot: -1.,
+        }
+    }
+}
+
+impl PlayerState {
+    pub fn shot(&mut self, time: f64) {
+        self.on = false;
+        self.last_shot = time;
+    }
+    pub fn spawned(&mut self) {
+        self.on = true;
+        self.last_shot = -1.;
+    }
+}
 // endregion: --- Resources
 
 fn main() {
@@ -63,7 +90,7 @@ fn main() {
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
-        .add_plugin(PLayerPlugin)
+        .add_plugin(PlayerPlugin)
         .add_plugin(EnemyPlugin)
         .add_startup_system(setup_system)
         .add_system(movable_system)
@@ -89,7 +116,7 @@ fn setup_system(
     let (win_w, win_h) = (window.width(), window.height());
 
     // Position window (For tutorial) // TODO: Remove this later
-    window.set_position(IVec2::new(2780, 4900));
+    // window.set_position(IVec2::new(2780, 4900));
 
     // Add win_size resource
     let win_size = WinSize { w: win_w, h: win_h };
@@ -130,7 +157,7 @@ fn movable_system(
                 || translation.x > win_size.w / 2. + MARGIN
                 || translation.x < -win_size.w / 2. - MARGIN
             {
-                // println!("->> Despawn {entity:?}");
+                // println!("->> Despawn {entity:?}"); // Comment out this line. Only used for debugging
                 commands.entity(entity).despawn();
             }
         }
@@ -193,6 +220,8 @@ fn player_laser_hit_enemy_system(
 
 fn enemy_laser_hit_player_system(
     mut commands: Commands,
+    mut player_state: ResMut<PlayerState>,
+    time: Res<Time>,
     laser_query: Query<(Entity, &Transform, &SpriteSize), (With<Laser>, With<FromEnemy>)>,
     player_query: Query<(Entity, &Transform, &SpriteSize), With<Player>>,
 ) {
@@ -214,6 +243,7 @@ fn enemy_laser_hit_player_system(
             if let Some(_) = collision {
                 // Remove the player
                 commands.entity(player_entity).despawn();
+                player_state.shot(time.seconds_since_startup());
 
                 // Remove the laser
                 commands.entity(laser_entity).despawn();
